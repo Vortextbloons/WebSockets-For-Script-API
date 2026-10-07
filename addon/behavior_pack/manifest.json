@@ -1,0 +1,20 @@
+{
+  "format_version": 2,
+  "header": {
+    "name": "Script API Bridge",
+    "description": "A minimal local request and event bridge for Minecraft Bedrock.",
+    "uuid": "b1844901-9a92-422c-8441-3818cd1088ad",
+    "version": [1, 0, 0],
+    "min_engine_version": [1, 26, 50]
+  },
+  "modules": [
+    {
+      "type": "script",
+      "uuid": "528a48ec-a685-4b6c-8083-66dfa9e40836",
+      "version": [1, 0, 0],
+      "language": "javascript",
+      "entry": "scripts/main.js"
+    }
+  ],
+  "dependencies": [{ "module_name": "@minecraft/server", "version": "2.9.0" }]
+}

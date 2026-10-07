@@ -1,0 +1,32 @@
+:root { color-scheme: light; --ink: #233742; --muted: #5b727b; --paper: #f1f6f8; --line: #c9d8de; --blue: #086787; --wash: #deedf3; }
+* { box-sizing: border-box; }
+body { margin: 0; padding: 32px; background: var(--paper); color: var(--ink); font: 16px/1.5 "Segoe UI", sans-serif; }
+header { max-width: 1200px; margin: 0 auto 32px; display: flex; justify-content: space-between; align-items: center; gap: 20px; }
+h1 { margin: 0; font: 600 32px/1.2 "Bahnschrift", "Segoe UI", sans-serif; letter-spacing: -1px; }
+header p { margin: 6px 0 0; color: var(--muted); }
+#state { padding: 8px 14px; border-radius: 4px; background: var(--wash); font-size: 14px; }
+main { max-width: 1200px; margin: auto; display: grid; grid-template-columns: minmax(260px, 380px) minmax(0, 1fr); gap: 36px; }
+section { min-width: 0; }
+h2 { margin: 0 0 16px; font-size: 18px; font-weight: 600; }
+form { display: grid; gap: 8px; margin-bottom: 28px; }
+label { font-size: 14px; margin-top: 6px; }
+input, select, textarea, button { font: inherit; border: 1px solid var(--line); border-radius: 4px; padding: 10px 12px; }
+input, select, textarea { width: 100%; background: white; color: var(--ink); }
+textarea, pre, code { font: 13px/1.6 Consolas, monospace; }
+textarea { resize: vertical; min-height: 120px; }
+button { cursor: pointer; background: var(--blue); color: white; }
+button:disabled { opacity: .55; cursor: wait; }
+:focus-visible { outline: 3px solid #2798bc; outline-offset: 3px; }
+pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; }
+#result { padding: 16px; background: white; border-left: 3px solid var(--blue); min-height: 92px; max-height: 340px; overflow: auto; }
+details { margin-top: 24px; font-size: 14px; }
+summary { cursor: pointer; color: var(--blue); }
+details code { display: block; overflow-wrap: anywhere; }
+.traffic { border-left: 1px solid var(--line); padding-left: 28px; }
+.section-head { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; }
+.section-head button { background: transparent; color: var(--muted); padding: 4px 10px; font-size: 13px; }
+#empty { color: var(--muted); font-size: 14px; }
+ol { list-style: none; padding: 0; margin: 0; max-height: 72vh; overflow: auto; }
+li { padding: 14px 0; border-bottom: 1px solid var(--line); }
+.meta { color: var(--muted); font-size: 12px; margin-bottom: 6px; }
+@media (max-width: 720px) { body { padding: 20px; } header { align-items: flex-start; flex-direction: column; } main { grid-template-columns: 1fr; gap: 32px; } .traffic { border-left: 0; border-top: 1px solid var(--line); padding: 24px 0 0; } }

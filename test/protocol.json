@@ -1,0 +1,24 @@
+{
+  "valid": [
+    {"v":1,"kind":"request","id":"fixture-1","name":"app.echo","data":{"text":"Quotes \"slashes\\\"\nline\rreturn ♥ 😀","html":"<script>"}},
+    {"v":1,"kind":"request","id":"fixture-2","name":"game.time","data":null},
+    {"v":1,"kind":"response","id":"fixture-2","data":[true,12,"hello",null]},
+    {"v":1,"kind":"response","id":"fixture-1","error":{"code":"INVALID_DATA","message":"Expected text"}},
+    {"v":1,"kind":"event","name":"game.player_joined","data":{"name":"Steve"}}
+  ],
+  "invalid": [
+    null,
+    {"v":2,"kind":"event","name":"changed","data":null},
+    {"v":1,"kind":"request","name":"app.echo","data":null},
+    {"v":1,"kind":"request","id":"x","name":"","data":null},
+    {"v":1,"kind":"request","id":"x","name":"app.echo"},
+    {"v":1,"kind":"request","id":"x","name":"app.echo","data":null,"error":null},
+    {"v":1,"kind":"response","id":"x"},
+    {"v":1,"kind":"response","id":"x","data":null,"error":{"code":"ERR","message":"No"}},
+    {"v":1,"kind":"response","id":"x","error":null},
+    {"v":1,"kind":"response","id":"x","name":"unexpected","data":null},
+    {"v":1,"kind":"event","name":"changed","id":"x","data":null},
+    {"v":1,"kind":"event","name":"changed","id":"","data":null},
+    {"v":1,"kind":"other","data":null}
+  ]
+}
