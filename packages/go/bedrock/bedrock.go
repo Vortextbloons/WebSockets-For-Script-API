@@ -5,17 +5,21 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
-	"scriptbridge/internal/bridge"
+	"scriptbridge/bridge"
 )
 
-const Namespace = "scaffold"
-const Prefix = "§8[SC] "
+type Config struct {
+	Namespace string
+	Prefix    string
+	Timeout   time.Duration
+}
 
 type State struct {
 	Connected bool   `json:"connected"`
@@ -26,18 +30,21 @@ type State struct {
 type Server struct {
 	Register func(*bridge.Bridge)
 	Observe  func(string, any)
+	config   Config
 	mu       sync.Mutex
 	active   *session
 	state    State
 }
 
 type session struct {
-	conn     *websocket.Conn
-	peer     *bridge.Bridge
-	ctx      context.Context
-	cancel   context.CancelFunc
-	writer   chan struct{}
-	sequence atomic.Uint64
+	conn      *websocket.Conn
+	peer      *bridge.Bridge
+	ctx       context.Context
+	cancel    context.CancelFunc
+	writer    chan struct{}
+	sequence  atomic.Uint64
+	namespace string
+	prefix    string
 }
 
 type packet struct {
@@ -47,6 +54,19 @@ type packet struct {
 		EventName      string `json:"eventName"`
 	} `json:"header"`
 	Body json.RawMessage `json:"body"`
+}
+
+func New(config Config) (*Server, error) {
+	if config.Namespace == "" {
+		config.Namespace = "scaffold"
+	}
+	if config.Prefix == "" {
+		config.Prefix = "§8[SC] "
+	}
+	if !regexp.MustCompile(`^[a-z0-9_.-]+$`).MatchString(config.Namespace) || strings.ContainsAny(config.Prefix, "\r\n") || config.Timeout < 0 {
+		return nil, fmt.Errorf("expected a Minecraft namespace, a single-line prefix, and a positive timeout")
+	}
+	return &Server{config: config}, nil
 }
 
 func (s *Server) State() State {
@@ -108,10 +128,10 @@ func (s *Server) Handler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	active := &session{conn: conn, ctx: ctx, cancel: cancel, writer: make(chan struct{}, 1)}
-	active.peer = bridge.New(active.send, func(direction string, frame bridge.Frame) {
+	active := &session{conn: conn, ctx: ctx, cancel: cancel, writer: make(chan struct{}, 1), namespace: s.config.Namespace, prefix: s.config.Prefix}
+	active.peer = bridge.New(active.send, bridge.Options{Timeout: s.config.Timeout, Observe: func(direction string, frame bridge.Frame) {
 		s.publish("frame", map[string]any{"direction": direction, "frame": frame})
-	})
+	}})
 	if s.Register != nil {
 		s.Register(active.peer)
 	}
@@ -190,7 +210,7 @@ func (s *Server) Handler(w http.ResponseWriter, r *http.Request) {
 				s.publish("error", err)
 			}
 		case "event":
-			if raw := playerFrame(p); raw != nil {
+			if raw := playerFrame(p, active.prefix); raw != nil {
 				if err := active.peer.Receive(ctx, raw); err != nil {
 					s.publish("error", bridge.Failure(err))
 				}
@@ -199,7 +219,7 @@ func (s *Server) Handler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func playerFrame(p packet) []byte {
+func playerFrame(p packet, prefix string) []byte {
 	var body struct {
 		EventName string `json:"eventName"`
 		Message   string `json:"message"`
@@ -209,8 +229,10 @@ func playerFrame(p packet) []byte {
 	if json.Unmarshal(p.Body, &body) != nil || (p.Header.EventName != "PlayerMessage" && body.EventName != "PlayerMessage") || body.Type != "say" || body.Sender != "Server" {
 		return nil
 	}
-	message := strings.TrimPrefix(body.Message, "[Server] ")
-	if raw, ok := strings.CutPrefix(message, Prefix); ok {
+	if raw, ok := strings.CutPrefix(body.Message, prefix); ok {
+		return []byte(raw)
+	}
+	if raw, ok := strings.CutPrefix(body.Message, "[Server] "+prefix); ok {
 		return []byte(raw)
 	}
 	return nil
@@ -229,7 +251,7 @@ func (s *session) send(ctx context.Context, frame bridge.Frame) error {
 		id = "request-" + frame.ID
 	}
 	return s.write(ctx, "commandRequest", id, map[string]any{
-		"commandLine": "scriptevent " + Namespace + ":message " + string(raw), "version": 1,
+		"commandLine": "scriptevent " + s.namespace + ":message " + string(raw), "version": 1,
 	})
 }
 

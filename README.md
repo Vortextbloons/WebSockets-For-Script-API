@@ -1,130 +1,109 @@
 # Script API Bridge
 
-A copyable Minecraft Bedrock + Go starter for small JSON requests and events. Generated with the Script API Helper MCP, then reduced to a behavior pack, bridge, examples, and a local dashboard.
+Small reusable libraries for JSON requests and events, plus a Minecraft Bedrock + Go starter with a local dashboard. Feature names and JSON data belong to your application; the bridge handles routing, replies, and timeouts. [MIT licensed](LICENSE).
 
-## Run
+## Start the example
 
-Requires Node.js 22+, Go 1.22+, and Minecraft for Windows with `/wsserver` support. The add-on pins stable `@minecraft/server` 2.9.0 and targets Minecraft 1.26.50+. Beta APIs and a resource pack are not required.
+Requires Node.js 22+, Go 1.22+, and Minecraft for Windows with `/wsserver`. The pack targets Minecraft 1.26.50+ and stable `@minecraft/server` 2.9.0. Real-game compatibility still needs a smoke test.
 
 ```powershell
 npm install
-npm run typecheck
 npm run build
 npm run server
 ```
 
-Copy `addon/behavior_pack` into your Minecraft installation's `development_behavior_packs` folder. Activate **Script API Bridge** in a world with cheats enabled, then enter:
+Copy `addon/behavior_pack` into Minecraft's `development_behavior_packs`. Enable the pack and cheats, open [the dashboard](http://127.0.0.1:8765), and run:
 
 ```text
 /wsserver localhost:8765/ws
 ```
 
-Open <http://127.0.0.1:8765>. The dashboard shows **Minecraft ready** after the add-on replies to the handshake. Its Local app example works without Minecraft; select Minecraft to request `game.time` with `null` data.
+Wait for **Minecraft ready**. Request `game.time` with `null` data in the dashboard. Run `/scriptevent scaffold:demo Hello` to test a request from Minecraft to the app. Initial player spawns publish `game.player_joined`.
 
-Test Minecraft → app inside the world:
+`npm run dev` rebuilds and starts the app. Copy the rebuilt pack and reload it after changes.
 
-```text
-/scriptevent scaffold:demo Hello from Minecraft
+## Reuse the libraries
+
+| Location | Purpose |
+| --- | --- |
+| [packages/script-api-bridge](packages/script-api-bridge/README.md) | npm library: transport-independent TypeScript core and Minecraft adapter |
+| [packages/go](packages/go/README.md) | Go module: public `bridge` and `bedrock` packages |
+| `addon/` and `server/` | Starter: manifest, bundling, example features, dashboard, startup |
+
+The starter imports both libraries. Its local dependency paths can be replaced with published versions later.
+
+For your own add-on, build and pack the npm library:
+
+```powershell
+npm pack ./packages/script-api-bridge
 ```
 
-The app returns the text and the add-on displays it. Initial player spawns publish `game.player_joined` events. Only events occurring after connection appear in the dashboard.
-
-If Minecraft requests encrypted WebSockets, turn off **Encrypted Websockets** in Minecraft settings; this scaffold uses a local unencrypted connection. Reconnect manually after restarting the app. Reloading the add-on announces startup and triggers a new handshake if the game socket is still connected.
-
-## How it works
-
-```text
-Dashboard ── HTTP requests / live WebSocket ── Go app
-                                               ↕ Minecraft WebSocket
-                                            Minecraft
-                                               ↕ commands / script events
-                                          TypeScript add-on
-```
-
-Minecraft opens the socket, not the add-on. The app subscribes to `PlayerMessage` events. App → add-on messages use `scriptevent scaffold:message <json>` in Minecraft command packets. Add-on → app messages use `say §8[SC] <json>` and arrive as server `say` events. The bridge only accepts the expected server message shape and prefix; a player's chat message containing the prefix is ignored.
-
-Outbound add-on frames are visible in chat. Do not put secrets in them. This transport is for small messages in a trusted local world. The namespace, prefix, and ScriptEventSource filtering are routing guards, not authentication against privileged operators or other behavior packs.
-
-The game socket (`/ws`) and browser socket (`/api/live`) are separate protocols. A successful command response means Minecraft accepted a command; only the bridge response means a request handler completed. Command rejections fail the matching pending request.
-
-## Add a feature
-
-Add-on handlers live in `addon/src/features.ts`:
+Install the resulting archive in your add-on, alongside `@minecraft/server`, and bundle with that Minecraft module external:
 
 ```typescript
-bridge.handle("game.players", () =>
-  world.getAllPlayers().map((player) => player.name)
-);
+import { createMinecraftBridge } from "script-api-bridge/minecraft";
 
-const result = await bridge.request("app.echo", { text: "Hello" });
-bridge.emit("game.changed", { value: 3 });
-const unsubscribe = bridge.on("app.notice", (data) => world.sendMessage(JSON.stringify(data)));
+const connection = createMinecraftBridge({ namespace: "myaddon", prefix: "[MY] " });
+connection.bridge.handle("game.example", (data) => ({ received: data }));
 ```
 
-Go handlers live in `server/internal/features/features.go`:
+Use matching values in Go:
 
 ```go
-b.Handle("app.example", func(ctx context.Context, raw json.RawMessage) (any, error) {
-    return map[string]string{"message": "Hello"}, nil
-})
+game, err := bedrock.New(bedrock.Config{Namespace: "myaddon", Prefix: "[MY] "})
 ```
 
-Use `b.Request(ctx, name, data)`, `b.Emit(ctx, name, data)`, and `b.On(name, listener)` inside handlers registered with the connected bridge. At application startup, `game.Request` and `game.Emit` address the connected add-on. `On` returns an unsubscribe function. Event listeners should do short, synchronous work; use request handlers for asynchronous processing. Go handlers should honor their context.
+Handle the error, register application handlers through `game.Register`, and mount `game.Handler` on your HTTP mux. Bind to a loopback address. Library setup examples are in the package READMEs above.
 
-Handlers validate their data. Return `bridge.Error{Code: "INVALID_DATA", Message: "..."}` in Go or throw `BridgeError` in TypeScript for a named failure. Other handler errors become `HANDLER_ERROR`. Register each request name once. There is no handler discovery, dependency injection container, or plugin loader.
+For other transports, instantiate `Bridge` with a sender and scheduler in TypeScript, or `bridge.New` with a sender in Go. Feed incoming JSON to `receive` / `Receive`. The core imports no Minecraft APIs and knows no application features.
 
-## Layout
+## Extend and clean up
 
-```text
-addon/
-  behavior_pack/manifest.json  MCP-generated pack identity
-  src/main.ts                 initialization
-  src/bridge/                 protocol, request routing, Minecraft adapter
-  src/features.ts             example game handlers and triggers
-server/
-  cmd/bridge/                 application startup
-  internal/bridge/            protocol and request routing
-  internal/bedrock/           Minecraft socket adapter
-  internal/features/          example app handlers
-  internal/dashboard/         embedded browser interface
-test/protocol.json            shared Go/TypeScript protocol fixtures
-```
+Add starter features in `addon/src/features.ts` and `server/internal/features/features.go`.
 
-To copy the scaffold: change package/module names, pack name and description, generate fresh manifest UUIDs with the Script API MCP, and choose your namespace and prefix in both Minecraft adapters. Update Go imports if the module name changes. Replace the feature examples. The bridge requires no changes for new request names.
+| Operation | TypeScript | Go |
+| --- | --- | --- |
+| Request a result | `request(name, data)` → promise | `Request(ctx, name, data)` → JSON bytes, error |
+| Register a request | `handle(name, handler)` | `Handle(name, handler)` |
+| Publish an event | `emit(name, data)` | `Emit(ctx, name, data)` |
+| Listen for an event | `on(name, listener)` → unsubscribe | `On(name, listener)` → unsubscribe |
 
-Build output is ignored. Builds do not modify manifests. No deployment path is stored in source; manually copy the built behavior pack, or use the Script API MCP's deploy operation with your installation path.
+Register request names once. Validate data inside handlers; throw `BridgeError` from `script-api-bridge`, or return `*bridge.Error`, for named failures. Go handlers should honor their context; listeners should finish quickly.
 
-## Contract and limits
+Call the returned unsubscribe function to stop a listener. Call `connection.close()` for the Minecraft adapter, `bridge.close()` for a standalone TypeScript bridge, or `Close()` in Go when that connection ends. Cleanup rejects pending requests and releases listeners; the Minecraft adapter also removes its Script API subscription and timers. Manage your own feature subscriptions separately.
+
+To copy the starter, rename the pack, generate fresh manifest UUIDs with the Script API MCP, change the matching namespace/prefix in both entry points, and replace the example features. Keep library code shared.
+
+## Transport and contract
+
+Minecraft opens the WebSocket. Go sends a command packet containing `scriptevent <namespace>:message <json>`. The add-on responds through `say <prefix><json>`, received as a subscribed `PlayerMessage` event. Command acceptance does not complete a bridge request; its matching response does.
 
 ```json
-{"v":1,"kind":"request","id":"unique-id","name":"game.time","data":null}
-{"v":1,"kind":"response","id":"unique-id","data":{"ticks":1200}}
-{"v":1,"kind":"response","id":"unique-id","error":{"code":"INVALID_DATA","message":"Expected text"}}
-{"v":1,"kind":"event","name":"game.player_joined","data":{"name":"Steve"}}
+{"v":1,"kind":"request","id":"unique","name":"game.time","data":null}
+{"v":1,"kind":"response","id":"unique","data":{"ticks":1200}}
+{"v":1,"kind":"response","id":"unique","error":{"code":"INVALID_DATA","message":"Expected text"}}
+{"v":1,"kind":"event","name":"game.changed","data":{"value":3}}
 ```
 
-Data can be any JSON value, including arrays or `null`. Requests have IDs; events do not. Responses contain either data or an error. IDs must be nonempty and at most 128 UTF-8 bytes. Unsupported versions and malformed envelopes are rejected; ordinary game messages are ignored.
+- Any JSON data, including arrays and `null`; 2,048 UTF-8 bytes per complete envelope.
+- 10-second requests by default. TypeScript accepts `request(name, data, timeoutMs)`; Go has `Options.Timeout` / `Config.Timeout` and context deadlines. Add-on timers follow game ticks.
+- 16 pending requests and 16 active handlers per endpoint. Events have no reply or delivery guarantee.
+- One world per Bedrock server instance. No retries, offline queue, replay, or persistence. Timeouts do not cancel remote work.
 
-Each encoded envelope is limited to 2,048 UTF-8 bytes, conservatively within the `/scriptevent` payload limit. Oversized requests fail before transmission; oversized results produce a compact error. There is no chunking, streaming, persistence, replay, or automatic request retry.
+The starter listens on `127.0.0.1:8765`. Add-on frames appear in chat; keep data non-secret. Local operators and packs must be trusted; prefixes and source filters are not authentication.
 
-Each endpoint allows 16 pending outbound requests and 16 active request handlers. Requests time out after 10 seconds; add-on timers use 200 game ticks, so paused or lagging worlds delay the timeout. Shorter Go context deadlines are respected. A timeout does not prove an action was cancelled or never executed. Late replies are ignored. Disconnect fails the app's pending requests; the add-on learns failure through its timeout.
+Dashboard API: `POST /api/request` accepts `{target: "app" | "game", name, data}` and returns `{data}` or `{error}`. `GET /api/live` streams `{type: "state" | "frame" | "error", data}` over a separate browser WebSocket.
 
-The app listens only on `127.0.0.1:8765`, accepts one Minecraft connection, and checks browser hosts/origins. Remote/LAN deployment needs a different security design. Browser traffic history is limited to 100 entries per tab and resets on reload; slow browser clients are disconnected instead of accumulating an unlimited queue.
+For `NOT_READY`, check pack activation and cheats, reload, and reconnect. The adapter requires Encrypted Websockets off. For `UNKNOWN_REQUEST`, check the destination and registered name. App restarts require manual reconnection.
 
-## Dashboard API
-
-- `POST /api/request`, JSON `{target: "app" | "game", name, data}` → `{data}` or `{error: {code, message}}`.
-- `GET /api/live`, browser WebSocket → `{type: "state" | "frame" | "error", data}`. Frame data includes `{direction: "in" | "out", frame}`; directions are relative to the Go app.
-- `GET /`, dashboard and local static assets.
-
-## Verify
+## Verify and release
 
 ```powershell
 npm run typecheck
 npm test
 npm run build
-cd server
-go vet ./...
 ```
 
-The tests use a simulated Minecraft socket and mocked Script API. Real-game acceptance: activate the pack, connect, request `game.time`, run the demo command, observe a player event, restart the app, and reconnect. API compilation and simulations do not establish compatibility with an actual Minecraft installation; record the game version when performing that smoke test.
+Tests cover shared protocol fixtures, simulated Minecraft sockets, cleanup, and separate consumers of the packed npm library and public Go module. Before release, test both request directions and events in Minecraft, then restart and reconnect.
+
+For a public release: choose the npm name/scope, give the Go module its repository import path, and replace the starter's local dependency paths with release versions. Use tags such as `packages/go/v0.1.0` for this nested Go module ([Go release guidance](https://go.dev/doc/modules/managing-source)). MIT license files, package exports, and declarations are included; no public release has been published.

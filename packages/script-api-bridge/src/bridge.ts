@@ -1,40 +1,47 @@
-import { BridgeError, decode, encode, failure, Frame, Json } from "./protocol";
+import { BridgeError, decode, encode, failure } from "./protocol.js";
+import type { Frame, Json } from "./protocol.js";
 
 type Handler = (data: Json) => Json | Promise<Json>;
 type Listener = (data: Json) => void;
-type Clock = { set(callback: () => void, milliseconds: number): number; clear(id: number): void };
+export type Clock = { set(callback: () => void, milliseconds: number): number; clear(id: number): void };
 
 export class Bridge {
   private readonly handlers = new Map<string, Handler>();
   private readonly events = new Map<string, Set<Listener>>();
   private readonly pending = new Map<string, { resolve(data: Json): void; reject(error: unknown): void }>();
-  private readonly prefix = `addon-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  private readonly prefix = `peer-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   private sequence = 0;
   private active = 0;
+  private closed = false;
 
   constructor(private readonly send: (raw: string) => void, private readonly clock: Clock) {
     this.handle("bridge.hello", () => ({ protocol: 1 }));
   }
 
   handle(name: string, handler: Handler): void {
+    this.ensureOpen();
     if (!name || this.handlers.has(name)) throw new Error(`Invalid or duplicate request handler: ${name}`);
     this.handlers.set(name, handler);
   }
 
   on(name: string, listener: Listener): () => void {
+    this.ensureOpen();
     if (!this.events.has(name)) this.events.set(name, new Set());
-    this.events.get(name)!.add(listener);
-    return () => { this.events.get(name)!.delete(listener); };
+    const listeners = this.events.get(name)!;
+    listeners.add(listener);
+    return () => { listeners.delete(listener); };
   }
 
-  request(name: string, data: Json = null): Promise<Json> {
+  request(name: string, data: Json = null, timeoutMs = 10_000): Promise<Json> {
+    if (this.closed) return Promise.reject(new BridgeError("DISCONNECTED", "Bridge closed"));
+    if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return Promise.reject(new Error("Timeout must be positive"));
     if (this.pending.size >= 16) return Promise.reject(new BridgeError("BUSY", "Too many pending requests"));
     const id = `${this.prefix}-${++this.sequence}`;
     return new Promise((resolve, reject) => {
       const timer = this.clock.set(() => {
         this.pending.delete(id);
         reject(new BridgeError("TIMEOUT", "Request ended before a result arrived"));
-      }, 10_000);
+      }, timeoutMs);
       this.pending.set(id, {
         resolve: (data) => { this.clock.clear(timer); resolve(data); },
         reject: (error) => { this.clock.clear(timer); reject(error); },
@@ -50,10 +57,12 @@ export class Bridge {
   }
 
   emit(name: string, data: Json = null): void {
+    this.ensureOpen();
     this.send(encode({ v: 1, kind: "event", name, data }));
   }
 
   async receive(raw: string): Promise<void> {
+    if (this.closed) return;
     const frame = decode(raw);
     if (frame.kind === "response") {
       const pending = this.pending.get(frame.id);
@@ -81,10 +90,24 @@ export class Bridge {
         this.active--;
       }
     }
+    if (this.closed) return;
     let encoded;
     try { encoded = encode(response); } catch (error) {
       encoded = encode({ v: 1, kind: "response", id: frame.id, error: failure(error) });
     }
     this.send(encoded);
+  }
+
+  close(): void {
+    this.closed = true;
+    for (const pending of this.pending.values()) pending.reject(new BridgeError("DISCONNECTED", "Bridge closed"));
+    this.pending.clear();
+    for (const listeners of this.events.values()) listeners.clear();
+    this.events.clear();
+    this.handlers.clear();
+  }
+
+  private ensureOpen(): void {
+    if (this.closed) throw new BridgeError("DISCONNECTED", "Bridge closed");
   }
 }

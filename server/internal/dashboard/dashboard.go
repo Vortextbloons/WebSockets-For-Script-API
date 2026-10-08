@@ -14,8 +14,8 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"scriptbridge/internal/bedrock"
-	"scriptbridge/internal/bridge"
+	"scriptbridge/bedrock"
+	"scriptbridge/bridge"
 )
 
 //go:embed static

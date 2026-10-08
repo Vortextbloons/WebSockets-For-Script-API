@@ -1,6 +1,6 @@
-import { createBridge, startBridge } from "./bridge/minecraft";
+import { createMinecraftBridge } from "script-api-bridge/minecraft";
 import { registerFeatures } from "./features";
 
-const bridge = createBridge();
-registerFeatures(bridge);
-startBridge(bridge);
+const namespace = "scaffold";
+const { bridge } = createMinecraftBridge({ namespace, prefix: "§8[SC] " });
+registerFeatures(bridge, namespace);

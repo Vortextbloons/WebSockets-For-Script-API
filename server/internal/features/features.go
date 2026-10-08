@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 
-	"scriptbridge/internal/bridge"
+	"scriptbridge/bridge"
 )
 
 func Register(b *bridge.Bridge) {

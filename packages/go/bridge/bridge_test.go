@@ -11,7 +11,7 @@ import (
 )
 
 func TestSharedProtocol(t *testing.T) {
-	raw, err := os.ReadFile("../../../test/protocol.json")
+	raw, err := os.ReadFile("../testdata/protocol.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +72,7 @@ func waitFrame(t *testing.T, frames <-chan Frame) Frame {
 
 func TestRequestsCorrelateRepliesAndDisconnect(t *testing.T) {
 	frames := make(chan Frame, 16)
-	b := New(func(_ context.Context, frame Frame) error { frames <- frame; return nil }, nil)
+	b := New(func(_ context.Context, frame Frame) error { frames <- frame; return nil }, Options{})
 	results := make(chan string, 2)
 	for _, text := range []string{"first", "second"} {
 		go func(text string) {
@@ -105,7 +105,7 @@ func TestRequestsCorrelateRepliesAndDisconnect(t *testing.T) {
 
 func TestTimeoutLateResponseAndWriteFailure(t *testing.T) {
 	frames := make(chan Frame, 16)
-	b := New(func(_ context.Context, frame Frame) error { frames <- frame; return nil }, nil)
+	b := New(func(_ context.Context, frame Frame) error { frames <- frame; return nil }, Options{})
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Millisecond)
 	defer cancel()
 	if _, err := b.Request(ctx, "never", nil); Failure(err).Code != "TIMEOUT" {
@@ -116,7 +116,7 @@ func TestTimeoutLateResponseAndWriteFailure(t *testing.T) {
 	if len(b.pending) != 0 {
 		t.Fatal("request leaked")
 	}
-	failing := New(func(context.Context, Frame) error { return &Error{Code: "DISCONNECTED", Message: "Write failed"} }, nil)
+	failing := New(func(context.Context, Frame) error { return &Error{Code: "DISCONNECTED", Message: "Write failed"} }, Options{})
 	if _, err := failing.Request(context.Background(), "echo", nil); Failure(err).Code != "DISCONNECTED" {
 		t.Fatal(err)
 	}
@@ -127,7 +127,7 @@ func TestTimeoutLateResponseAndWriteFailure(t *testing.T) {
 
 func TestHandlersAndEvents(t *testing.T) {
 	frames := make(chan Frame, 16)
-	b := New(func(_ context.Context, frame Frame) error { frames <- frame; return nil }, nil)
+	b := New(func(_ context.Context, frame Frame) error { frames <- frame; return nil }, Options{})
 	b.Handle("large", func(context.Context, json.RawMessage) (any, error) { return strings.Repeat("x", 3000), nil })
 	b.Handle("invalid", func(context.Context, json.RawMessage) (any, error) {
 		return nil, &Error{Code: "INVALID_DATA", Message: "Expected text"}
@@ -151,7 +151,7 @@ func TestHandlersAndEvents(t *testing.T) {
 
 func TestHandlerAndPendingLimits(t *testing.T) {
 	frames := make(chan Frame, 64)
-	b := New(func(_ context.Context, frame Frame) error { frames <- frame; return nil }, nil)
+	b := New(func(_ context.Context, frame Frame) error { frames <- frame; return nil }, Options{})
 	started, release := make(chan struct{}, Limit), make(chan struct{})
 	b.Handle("wait", func(context.Context, json.RawMessage) (any, error) { started <- struct{}{}; <-release; return nil, nil })
 	for i := 0; i < Limit; i++ {

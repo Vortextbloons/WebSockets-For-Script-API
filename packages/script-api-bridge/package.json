@@ -1,0 +1,20 @@
+{
+  "name": "script-api-bridge",
+  "version": "0.1.0",
+  "license": "MIT",
+  "description": "Small JSON request/event bridge with a Minecraft Bedrock adapter",
+  "type": "module",
+  "files": ["dist"],
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
+    "./minecraft": { "types": "./dist/minecraft.d.ts", "import": "./dist/minecraft.js" }
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "npm run build && node --test test/*.test.mjs",
+    "prepack": "npm run build"
+  },
+  "peerDependencies": { "@minecraft/server": "^2.9.0" },
+  "peerDependenciesMeta": { "@minecraft/server": { "optional": true } },
+  "devDependencies": { "@minecraft/server": "2.9.0", "typescript": "7.0.2" }
+}

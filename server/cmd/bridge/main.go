@@ -9,16 +9,20 @@ import (
 	"os/signal"
 	"time"
 
-	"scriptbridge/internal/bedrock"
-	"scriptbridge/internal/bridge"
-	"scriptbridge/internal/dashboard"
-	"scriptbridge/internal/features"
+	"scriptbridge-starter/internal/dashboard"
+	"scriptbridge-starter/internal/features"
+	"scriptbridge/bedrock"
+	"scriptbridge/bridge"
 )
 
 func main() {
-	app := bridge.New(nil, nil)
+	app := bridge.New(nil, bridge.Options{})
 	features.Register(app)
-	game := &bedrock.Server{Register: features.Register}
+	game, err := bedrock.New(bedrock.Config{Namespace: "scaffold", Prefix: "§8[SC] "})
+	if err != nil {
+		log.Fatal(err)
+	}
+	game.Register = features.Register
 	dash := &dashboard.Server{Game: game, App: app}
 	game.Observe = dash.Publish
 	mux := http.NewServeMux()

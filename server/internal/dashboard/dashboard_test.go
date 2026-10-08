@@ -8,13 +8,13 @@ import (
 	"testing"
 
 	"github.com/gorilla/websocket"
-	"scriptbridge/internal/bedrock"
-	"scriptbridge/internal/bridge"
-	"scriptbridge/internal/features"
+	"scriptbridge-starter/internal/features"
+	"scriptbridge/bedrock"
+	"scriptbridge/bridge"
 )
 
 func TestRequestAPIAndOriginProtection(t *testing.T) {
-	app := bridge.New(nil, nil)
+	app := bridge.New(nil, bridge.Options{})
 	features.Register(app)
 	dash := &Server{Game: &bedrock.Server{}, App: app}
 	mux := http.NewServeMux()

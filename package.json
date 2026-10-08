@@ -1,12 +1,15 @@
 {
-  "name": "script-api-bridge",
+  "name": "script-api-bridge-starter",
   "private": true,
+  "license": "MIT",
   "scripts": {
-    "postinstall": "npm install --prefix addon",
-    "build": "npm run build --prefix addon",
-    "typecheck": "npm run typecheck --prefix addon",
-    "test": "npm run test --prefix addon && npm run test:server",
-    "test:server": "cd server && go test ./...",
+    "postinstall": "npm install --prefix packages/script-api-bridge && npm run build:library && npm install --prefix addon",
+    "build:library": "npm run build --prefix packages/script-api-bridge",
+    "build": "npm run build:library && npm run build --prefix addon",
+    "typecheck": "npm run build:library && npm run typecheck --prefix addon",
+    "test": "npm run test --prefix packages/script-api-bridge && npm run test --prefix addon && npm run test:server && npm run test:consumer",
+    "test:server": "cd packages/go && go test ./... && cd ../../server && go test ./...",
+    "test:consumer": "node --test test/consumer.test.mjs",
     "server": "cd server && go run ./cmd/bridge",
     "dev": "npm run build && npm run server"
   }

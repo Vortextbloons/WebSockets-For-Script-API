@@ -10,9 +10,10 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"scriptbridge/internal/bridge"
-	"scriptbridge/internal/features"
+	"scriptbridge/bridge"
 )
+
+const testPrefix = "§8[CUSTOM] "
 
 func readFrame(t *testing.T, conn *websocket.Conn) (bridge.Frame, string) {
 	t.Helper()
@@ -26,7 +27,7 @@ func readFrame(t *testing.T, conn *websocket.Conn) (bridge.Frame, string) {
 	if err := json.Unmarshal(p.Body, &body); err != nil {
 		t.Fatal(err)
 	}
-	raw, ok := strings.CutPrefix(body.CommandLine, "scriptevent scaffold:message ")
+	raw, ok := strings.CutPrefix(body.CommandLine, "scriptevent custom:message ")
 	if !ok {
 		t.Fatal(body.CommandLine)
 	}
@@ -45,7 +46,7 @@ func sendFrame(t *testing.T, conn *websocket.Conn, frame bridge.Frame) {
 	}
 	if err := conn.WriteJSON(map[string]any{
 		"header": map[string]any{"messagePurpose": "event", "eventName": "PlayerMessage"},
-		"body":   map[string]string{"message": "[Server] " + Prefix + string(raw), "sender": "Server", "type": "say"},
+		"body":   map[string]string{"message": "[Server] " + testPrefix + string(raw), "sender": "Server", "type": "say"},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -54,11 +55,18 @@ func sendFrame(t *testing.T, conn *websocket.Conn, frame bridge.Frame) {
 func connect(t *testing.T) (*Server, *websocket.Conn, string) {
 	t.Helper()
 	states := make(chan State, 16)
-	game := &Server{Register: features.Register, Observe: func(kind string, data any) {
+	game, err := New(Config{Namespace: "custom", Prefix: testPrefix})
+	if err != nil {
+		t.Fatal(err)
+	}
+	game.Register = func(b *bridge.Bridge) {
+		b.Handle("app.echo", func(_ context.Context, data json.RawMessage) (any, error) { return data, nil })
+	}
+	game.Observe = func(kind string, data any) {
 		if kind == "state" {
 			states <- data.(State)
 		}
-	}}
+	}
 	server := httptest.NewServer(http.HandlerFunc(game.Handler))
 	conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(server.URL, "http"), nil)
 	if err != nil {
@@ -168,16 +176,16 @@ func TestPlayerMessageFiltering(t *testing.T) {
 		text, sender, kind string
 		accepted           bool
 	}{
-		{Prefix + frame, "Server", "say", true},
-		{"[Server] " + Prefix + frame, "Server", "say", true},
-		{Prefix + frame, "Steve", "say", false},
-		{Prefix + frame, "Server", "chat", false},
-		{"unrelated " + Prefix + frame, "Server", "say", false},
+		{testPrefix + frame, "Server", "say", true},
+		{"[Server] " + testPrefix + frame, "Server", "say", true},
+		{testPrefix + frame, "Steve", "say", false},
+		{testPrefix + frame, "Server", "chat", false},
+		{"unrelated " + testPrefix + frame, "Server", "say", false},
 	} {
 		body, _ := json.Marshal(map[string]string{"message": tc.text, "sender": tc.sender, "type": tc.kind})
 		p := packet{Body: body}
 		p.Header.EventName = "PlayerMessage"
-		if got := playerFrame(p) != nil; got != tc.accepted {
+		if got := playerFrame(p, testPrefix) != nil; got != tc.accepted {
 			t.Fatalf("wrong filter result: %+v", tc)
 		}
 	}

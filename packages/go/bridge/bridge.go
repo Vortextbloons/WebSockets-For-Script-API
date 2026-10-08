@@ -16,9 +16,15 @@ type Handler func(context.Context, json.RawMessage) (any, error)
 type Sender func(context.Context, Frame) error
 type Observer func(string, Frame)
 
+type Options struct {
+	Observe Observer
+	Timeout time.Duration
+}
+
 type Bridge struct {
 	send     Sender
 	observe  Observer
+	timeout  time.Duration
 	prefix   string
 	sequence atomic.Uint64
 	mu       sync.Mutex
@@ -29,9 +35,15 @@ type Bridge struct {
 	workers  chan struct{}
 }
 
-func New(send Sender, observe Observer) *Bridge {
+func New(send Sender, options Options) *Bridge {
+	if options.Timeout == 0 {
+		options.Timeout = Timeout
+	}
+	if options.Timeout < 0 {
+		panic("request timeout must be positive")
+	}
 	b := &Bridge{
-		send: send, observe: observe, prefix: fmt.Sprintf("app-%d", time.Now().UnixNano()),
+		send: send, observe: options.Observe, timeout: options.Timeout, prefix: fmt.Sprintf("peer-%d", time.Now().UnixNano()),
 		handlers: make(map[string]Handler), events: make(map[string]map[uint64]func(json.RawMessage)),
 		pending: make(map[string]chan Frame), workers: make(chan struct{}, Limit),
 	}
@@ -44,7 +56,7 @@ func New(send Sender, observe Observer) *Bridge {
 func (b *Bridge) Handle(name string, handler Handler) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if name == "" || handler == nil || b.handlers[name] != nil {
+	if b.closed || name == "" || handler == nil || b.handlers[name] != nil {
 		panic("invalid or duplicate request handler: " + name)
 	}
 	b.handlers[name] = handler
@@ -53,6 +65,10 @@ func (b *Bridge) Handle(name string, handler Handler) {
 func (b *Bridge) On(name string, listener func(json.RawMessage)) func() {
 	id := b.sequence.Add(1)
 	b.mu.Lock()
+	if b.closed {
+		b.mu.Unlock()
+		panic("bridge closed")
+	}
 	if b.events[name] == nil {
 		b.events[name] = make(map[uint64]func(json.RawMessage))
 	}
@@ -66,7 +82,7 @@ func (b *Bridge) On(name string, listener func(json.RawMessage)) func() {
 }
 
 func (b *Bridge) Request(ctx context.Context, name string, data any) (json.RawMessage, error) {
-	ctx, cancel := context.WithTimeout(ctx, Timeout)
+	ctx, cancel := context.WithTimeout(ctx, b.timeout)
 	defer cancel()
 	raw, err := json.Marshal(data)
 	if err != nil || name == "" {
@@ -79,7 +95,7 @@ func (b *Bridge) Request(ctx context.Context, name string, data any) (json.RawMe
 		closed := b.closed
 		b.mu.Unlock()
 		if closed {
-			return nil, &Error{Code: "DISCONNECTED", Message: "Minecraft disconnected"}
+			return nil, &Error{Code: "DISCONNECTED", Message: "Bridge closed"}
 		}
 		return nil, &Error{Code: "BUSY", Message: "Too many pending requests"}
 	}
@@ -120,7 +136,7 @@ func (b *Bridge) Send(ctx context.Context, frame Frame) error {
 	closed := b.closed
 	b.mu.Unlock()
 	if closed || b.send == nil {
-		return &Error{Code: "DISCONNECTED", Message: "Minecraft disconnected"}
+		return &Error{Code: "DISCONNECTED", Message: "Bridge unavailable"}
 	}
 	if err := b.send(ctx, frame); err != nil {
 		return err
@@ -149,7 +165,7 @@ func (b *Bridge) call(ctx context.Context, name string, data json.RawMessage) (r
 	handler, closed := b.handlers[name], b.closed
 	b.mu.Unlock()
 	if closed {
-		return nil, &Error{Code: "DISCONNECTED", Message: "Minecraft disconnected"}
+		return nil, &Error{Code: "DISCONNECTED", Message: "Bridge closed"}
 	}
 	if handler == nil {
 		return nil, &Error{Code: "UNKNOWN_REQUEST", Message: "Unknown request: " + name}
@@ -202,7 +218,7 @@ func (b *Bridge) Receive(ctx context.Context, raw []byte) error {
 		}
 		go func() {
 			defer func() { <-b.workers }()
-			ctx, cancel := context.WithTimeout(ctx, Timeout)
+			ctx, cancel := context.WithTimeout(ctx, b.timeout)
 			defer cancel()
 			result, err := b.call(ctx, frame.Name, frame.Data)
 			response := Frame{V: 1, Kind: "response", ID: frame.ID}
@@ -235,8 +251,10 @@ func (b *Bridge) Close() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.closed = true
+	clear(b.handlers)
+	clear(b.events)
 	for id, reply := range b.pending {
-		reply <- Frame{Error: &Error{Code: "DISCONNECTED", Message: "Minecraft disconnected"}}
+		reply <- Frame{Error: &Error{Code: "DISCONNECTED", Message: "Bridge closed"}}
 		delete(b.pending, id)
 	}
 }

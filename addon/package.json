@@ -1,12 +1,19 @@
 {
   "name": "script-api-bridge-addon",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "build": "node build.mjs",
     "typecheck": "tsc --noEmit",
     "test": "node --test test/*.test.mjs"
   },
-  "dependencies": { "@minecraft/server": "2.9.0" },
-  "devDependencies": { "esbuild": "0.28.2", "typescript": "7.0.2" }
+  "dependencies": {
+    "@minecraft/server": "2.9.0",
+    "script-api-bridge": "file:../packages/script-api-bridge"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2",
+    "typescript": "7.0.2"
+  }
 }
