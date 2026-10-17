@@ -1,4 +1,6 @@
 node_modules/
+server/internal/dashboard/static/*
+!server/internal/dashboard/static/.gitkeep
 addon/behavior_pack/scripts/
 server/bridge.exe
 packages/script-api-bridge/dist/

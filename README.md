@@ -20,7 +20,7 @@ Copy `addon/behavior_pack` into Minecraft's `development_behavior_packs`. Enable
 
 Wait for **Minecraft ready**. Request `game.time` with `null` data in the dashboard. Run `/scriptevent scaffold:demo Hello` to test a request from Minecraft to the app. Initial player spawns publish `game.player_joined`.
 
-`npm run dev` rebuilds and starts the app. Copy the rebuilt pack and reload it after changes.
+`npm run dev` builds the dashboard and starts the Go app. Copy the rebuilt pack and reload it after changes.
 
 ## Dashboard
 
@@ -33,6 +33,10 @@ The dashboard at `127.0.0.1:8765` shows connection state and health, and lets yo
 - **Export**: download the filtered traffic and request history as JSON or NDJSON.
 
 Dashboard API: `POST /api/request` accepts `{target: "app" | "game", name, data}` and returns `{data, durationMs}` or `{error, durationMs}`. `GET /api/live` streams `{type: "state" | "frame" | "error", data, at}` over a separate browser WebSocket; `at` is the server's Unix time in milliseconds.
+
+### Dashboard development
+
+Install dependencies with `npm install`. For hot reload, run `npm run server` in one terminal and `npm run dev:dashboard` in another, then open <http://127.0.0.1:5173>. Vite proxies dashboard API and live WebSocket traffic to Go on port `8765`; Minecraft should still connect to `localhost:8765/ws`. For production, `npm run build:dashboard` writes static assets into the Go embedded directory; `npm run server` builds them before starting Go. Run `npm run check:dashboard` for Svelte/TypeScript checking and `npm run fix:dashboard` to format the Svelte sources.
 
 ## Reuse the libraries
 

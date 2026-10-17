@@ -5,14 +5,18 @@
   "scripts": {
     "generate:contracts": "node contracts/generate.mjs",
     "check:contracts": "node contracts/generate.mjs --check",
-    "postinstall": "npm install --prefix packages/script-api-bridge && npm run build:library && npm install --prefix addon",
+    "postinstall": "npm install --prefix packages/script-api-bridge && npm run build:library && npm install --prefix addon && npm install --prefix dashboard",
     "build:library": "npm run build --prefix packages/script-api-bridge",
-    "build": "npm run check:contracts && npm run build:library && npm run build --prefix addon",
-    "typecheck": "npm run check:contracts && npm run build:library && npm run typecheck --prefix addon",
+    "build": "npm run check:contracts && npm run build:library && npm run build --prefix addon && npm run build:dashboard",
+    "typecheck": "npm run check:contracts && npm run build:library && npm run typecheck --prefix addon && npm run check --prefix dashboard",
+    "build:dashboard": "npm run build --prefix dashboard",
+    "check:dashboard": "npm run check --prefix dashboard",
+    "fix:dashboard": "npm run fix --prefix dashboard",
+    "dev:dashboard": "npm run dev --prefix dashboard",
     "test": "npm run check:contracts && npm run test --prefix packages/script-api-bridge && npm run test --prefix addon && npm run test:server && npm run test:consumer",
-    "test:server": "cd packages/go && go test ./... && cd ../../server && go test ./...",
+    "test:server": "npm run build:dashboard && cd packages/go && go test ./... && cd ../../server && go test ./...",
     "test:consumer": "node --test test/consumer.test.mjs",
-    "server": "cd server && go run ./cmd/bridge",
+    "server": "npm run build:dashboard && cd server && go run ./cmd/bridge",
     "dev": "npm run build && npm run server"
   }
 }
