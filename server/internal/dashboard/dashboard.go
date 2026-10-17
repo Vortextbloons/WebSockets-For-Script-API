@@ -28,8 +28,15 @@ type Server struct {
 	clients map[*websocket.Conn]chan []byte
 }
 
+// envelope encodes one live message. Each message carries the server's Unix millisecond
+// time, so the dashboard can show accurate timestamps and latencies.
+func envelope(kind string, data any) ([]byte, error) {
+	return json.Marshal(map[string]any{"type": kind, "data": data, "at": time.Now().UnixMilli()})
+}
+
+// Publish sends one message to every live browser.
 func (s *Server) Publish(kind string, data any) {
-	raw, err := json.Marshal(map[string]any{"type": kind, "data": data})
+	raw, err := envelope(kind, data)
 	if err != nil {
 		return
 	}
@@ -94,35 +101,46 @@ func (s *Server) request(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), bridge.Timeout)
 	defer cancel()
+	started := time.Now()
 	_, err = bridge.Encode(bridge.Frame{V: 1, Kind: "request", ID: "dashboard", Name: input.Name, Data: input.Data})
-	var result any
+	var result json.RawMessage
 	if err == nil {
 		if input.Target == "app" {
-			result, err = s.App.Call(ctx, input.Name, input.Data)
+			var reply any
+			reply, err = s.App.Call(ctx, input.Name, input.Data)
+			if err == nil {
+				result, err = json.Marshal(reply)
+			}
 		} else {
 			result, err = s.Game.Request(ctx, input.Name, input.Data)
 		}
 	}
+	durationMs := time.Since(started).Milliseconds()
 	if err != nil {
 		err := bridge.Failure(err)
-		status := http.StatusBadGateway
-		switch err.Code {
-		case "INVALID_DATA", "PAYLOAD_TOO_LARGE":
-			status = http.StatusBadRequest
-		case "UNKNOWN_REQUEST":
-			status = http.StatusNotFound
-		case "BUSY":
-			status = http.StatusTooManyRequests
-		case "NOT_READY", "DISCONNECTED":
-			status = http.StatusServiceUnavailable
-		case "TIMEOUT":
-			status = http.StatusGatewayTimeout
-		}
-		w.WriteHeader(status)
-		_ = json.NewEncoder(w).Encode(map[string]any{"error": err})
+		w.WriteHeader(statusFor(err.Code))
+		_ = json.NewEncoder(w).Encode(map[string]any{"error": err, "durationMs": durationMs})
 		return
 	}
-	_ = json.NewEncoder(w).Encode(map[string]any{"data": result})
+	_ = json.NewEncoder(w).Encode(map[string]any{"data": result, "durationMs": durationMs})
+}
+
+// statusFor maps standard bridge error codes to HTTP statuses.
+func statusFor(code string) int {
+	switch code {
+	case bridge.CodeInvalidData, bridge.CodePayloadTooLarge:
+		return http.StatusBadRequest
+	case bridge.CodeUnknownRequest:
+		return http.StatusNotFound
+	case bridge.CodeBusy:
+		return http.StatusTooManyRequests
+	case bridge.CodeNotReady, bridge.CodeDisconnected:
+		return http.StatusServiceUnavailable
+	case bridge.CodeTimeout:
+		return http.StatusGatewayTimeout
+	default:
+		return http.StatusBadGateway
+	}
 }
 
 func (s *Server) live(w http.ResponseWriter, r *http.Request) {
@@ -136,7 +154,7 @@ func (s *Server) live(w http.ResponseWriter, r *http.Request) {
 	if s.clients == nil {
 		s.clients = make(map[*websocket.Conn]chan []byte)
 	}
-	initial, _ := json.Marshal(map[string]any{"type": "state", "data": s.Game.State()})
+	initial, _ := envelope("state", s.Game.State())
 	queue <- initial
 	s.clients[conn] = queue
 	s.mu.Unlock()

@@ -3,9 +3,27 @@ package bridge
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 )
 
 const MaxBytes = 2048
+
+// Standard error codes. The TypeScript package exports the same names and values.
+const (
+	CodeInvalidFrame    = "INVALID_FRAME"
+	CodeInvalidData     = "INVALID_DATA"
+	CodePayloadTooLarge = "PAYLOAD_TOO_LARGE"
+	CodeUnknownRequest  = "UNKNOWN_REQUEST"
+	CodeHandlerError    = "HANDLER_ERROR"
+	CodeListenerError   = "LISTENER_ERROR"
+	CodeTimeout         = "TIMEOUT"
+	CodeBusy            = "BUSY"
+	CodeDisconnected    = "DISCONNECTED"
+	CodeNotReady        = "NOT_READY"
+	CodeCommandRejected = "COMMAND_REJECTED"
+	CodeIncompatible    = "INCOMPATIBLE"
+	CodeInternal        = "INTERNAL_ERROR"
+)
 
 type Error struct {
 	Code    string `json:"code"`
@@ -14,12 +32,17 @@ type Error struct {
 
 func (e *Error) Error() string { return e.Message }
 
+// Errorf builds a named error with a formatted message.
+func Errorf(code, format string, args ...any) *Error {
+	return &Error{Code: code, Message: fmt.Sprintf(format, args...)}
+}
+
 func Failure(err error) *Error {
 	var result *Error
 	if errors.As(err, &result) {
 		return result
 	}
-	return &Error{Code: "HANDLER_ERROR", Message: err.Error()}
+	return &Error{Code: CodeHandlerError, Message: err.Error()}
 }
 
 type Frame struct {
@@ -34,10 +57,10 @@ type Frame struct {
 func Encode(frame Frame) ([]byte, error) {
 	raw, err := json.Marshal(frame)
 	if err != nil {
-		return nil, &Error{Code: "INVALID_DATA", Message: "Data must be JSON"}
+		return nil, &Error{Code: CodeInvalidData, Message: "Data must be JSON"}
 	}
 	if len(raw) > MaxBytes {
-		return nil, &Error{Code: "PAYLOAD_TOO_LARGE", Message: "Message exceeds 2048 UTF-8 bytes"}
+		return nil, &Error{Code: CodePayloadTooLarge, Message: "Message exceeds 2048 UTF-8 bytes"}
 	}
 	if _, err := Decode(raw); err != nil {
 		return nil, err
@@ -48,10 +71,10 @@ func Encode(frame Frame) ([]byte, error) {
 func Decode(raw []byte) (Frame, error) {
 	var frame Frame
 	if len(raw) > MaxBytes {
-		return frame, &Error{Code: "PAYLOAD_TOO_LARGE", Message: "Message exceeds 2048 UTF-8 bytes"}
+		return frame, &Error{Code: CodePayloadTooLarge, Message: "Message exceeds 2048 UTF-8 bytes"}
 	}
 	if json.Unmarshal(raw, &frame) != nil || frame.V != 1 {
-		return frame, &Error{Code: "INVALID_FRAME", Message: "Invalid bridge message or version"}
+		return frame, &Error{Code: CodeInvalidFrame, Message: "Invalid bridge message or version"}
 	}
 	valid := false
 	var fields map[string]json.RawMessage
@@ -69,7 +92,7 @@ func Decode(raw []byte) (Frame, error) {
 		}
 	}
 	if !valid {
-		return frame, &Error{Code: "INVALID_FRAME", Message: "Invalid bridge envelope"}
+		return frame, &Error{Code: CodeInvalidFrame, Message: "Invalid bridge envelope"}
 	}
 	return frame, nil
 }

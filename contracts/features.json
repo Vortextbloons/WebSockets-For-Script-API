@@ -1,0 +1,9 @@
+{
+  "requests": {
+    "game.time": { "request": "null", "response": { "ticks": "number" } },
+    "app.echo": { "request": { "text": "string" }, "response": { "text": "string" } }
+  },
+  "events": {
+    "game.player_joined": { "name": "string" }
+  }
+}

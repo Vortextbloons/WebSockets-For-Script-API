@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -18,12 +19,16 @@ type Observer func(string, Frame)
 
 type Options struct {
 	Observe Observer
+	// OnError receives listener panics and other non-fatal problems.
+	// When nil, errors are written to the standard logger.
+	OnError func(error)
 	Timeout time.Duration
 }
 
 type Bridge struct {
 	send     Sender
 	observe  Observer
+	onError  func(error)
 	timeout  time.Duration
 	prefix   string
 	sequence atomic.Uint64
@@ -43,12 +48,16 @@ func New(send Sender, options Options) *Bridge {
 		panic("request timeout must be positive")
 	}
 	b := &Bridge{
-		send: send, observe: options.Observe, timeout: options.Timeout, prefix: fmt.Sprintf("peer-%d", time.Now().UnixNano()),
+		send: send, observe: options.Observe, onError: options.OnError, timeout: options.Timeout, prefix: fmt.Sprintf("peer-%d", time.Now().UnixNano()),
 		handlers: make(map[string]Handler), events: make(map[string]map[uint64]func(json.RawMessage)),
 		pending: make(map[string]chan Frame), workers: make(chan struct{}, Limit),
 	}
 	b.Handle("bridge.hello", func(context.Context, json.RawMessage) (any, error) {
 		return map[string]int{"protocol": 1}, nil
+	})
+	// Heartbeat: any reply, including UNKNOWN_REQUEST from an older peer, proves the peer is alive.
+	b.Handle("bridge.ping", func(context.Context, json.RawMessage) (any, error) {
+		return nil, nil
 	})
 	return b
 }
@@ -86,7 +95,7 @@ func (b *Bridge) Request(ctx context.Context, name string, data any) (json.RawMe
 	defer cancel()
 	raw, err := json.Marshal(data)
 	if err != nil || name == "" {
-		return nil, &Error{Code: "INVALID_DATA", Message: "Expected a request name and JSON data"}
+		return nil, &Error{Code: CodeInvalidData, Message: "Expected a request name and JSON data"}
 	}
 	id := fmt.Sprintf("%s-%d", b.prefix, b.sequence.Add(1))
 	reply := make(chan Frame, 1)
@@ -95,9 +104,9 @@ func (b *Bridge) Request(ctx context.Context, name string, data any) (json.RawMe
 		closed := b.closed
 		b.mu.Unlock()
 		if closed {
-			return nil, &Error{Code: "DISCONNECTED", Message: "Bridge closed"}
+			return nil, &Error{Code: CodeDisconnected, Message: "Bridge closed"}
 		}
-		return nil, &Error{Code: "BUSY", Message: "Too many pending requests"}
+		return nil, &Error{Code: CodeBusy, Message: "Too many pending requests"}
 	}
 	b.pending[id] = reply
 	b.mu.Unlock()
@@ -116,14 +125,14 @@ func (b *Bridge) Request(ctx context.Context, name string, data any) (json.RawMe
 		}
 		return result.Data, nil
 	case <-ctx.Done():
-		return nil, &Error{Code: "TIMEOUT", Message: "Request ended before a result arrived"}
+		return nil, &Error{Code: CodeTimeout, Message: "Request ended before a result arrived"}
 	}
 }
 
 func (b *Bridge) Emit(ctx context.Context, name string, data any) error {
 	raw, err := json.Marshal(data)
 	if err != nil || name == "" {
-		return &Error{Code: "INVALID_DATA", Message: "Expected an event name and JSON data"}
+		return &Error{Code: CodeInvalidData, Message: "Expected an event name and JSON data"}
 	}
 	return b.Send(ctx, Frame{V: 1, Kind: "event", Name: name, Data: raw})
 }
@@ -136,7 +145,7 @@ func (b *Bridge) Send(ctx context.Context, frame Frame) error {
 	closed := b.closed
 	b.mu.Unlock()
 	if closed || b.send == nil {
-		return &Error{Code: "DISCONNECTED", Message: "Bridge unavailable"}
+		return &Error{Code: CodeDisconnected, Message: "Bridge unavailable"}
 	}
 	if err := b.send(ctx, frame); err != nil {
 		return err
@@ -152,27 +161,27 @@ func (b *Bridge) Call(ctx context.Context, name string, data json.RawMessage) (r
 	case b.workers <- struct{}{}:
 		defer func() { <-b.workers }()
 	default:
-		return nil, &Error{Code: "BUSY", Message: "Too many active handlers"}
+		return nil, &Error{Code: CodeBusy, Message: "Too many active handlers"}
 	}
 	return b.call(ctx, name, data)
 }
 
 func (b *Bridge) call(ctx context.Context, name string, data json.RawMessage) (result any, err error) {
 	if ctx.Err() != nil {
-		return nil, &Error{Code: "TIMEOUT", Message: "Request deadline elapsed"}
+		return nil, &Error{Code: CodeTimeout, Message: "Request deadline elapsed"}
 	}
 	b.mu.Lock()
 	handler, closed := b.handlers[name], b.closed
 	b.mu.Unlock()
 	if closed {
-		return nil, &Error{Code: "DISCONNECTED", Message: "Bridge closed"}
+		return nil, &Error{Code: CodeDisconnected, Message: "Bridge closed"}
 	}
 	if handler == nil {
-		return nil, &Error{Code: "UNKNOWN_REQUEST", Message: "Unknown request: " + name}
+		return nil, &Error{Code: CodeUnknownRequest, Message: "Unknown request: " + name}
 	}
 	defer func() {
 		if recover() != nil {
-			result, err = nil, &Error{Code: "HANDLER_ERROR", Message: "Handler panicked"}
+			result, err = nil, &Error{Code: CodeHandlerError, Message: "Handler panicked"}
 		}
 	}()
 	return handler(ctx, data)
@@ -206,7 +215,7 @@ func (b *Bridge) Receive(ctx context.Context, raw []byte) error {
 		}
 		b.mu.Unlock()
 		for _, listener := range listeners {
-			listener(frame.Data)
+			b.deliver(frame.Name, listener, frame.Data)
 		}
 		b.mu.Lock()
 	case "request":
@@ -214,7 +223,7 @@ func (b *Bridge) Receive(ctx context.Context, raw []byte) error {
 		case b.workers <- struct{}{}:
 		default:
 			b.mu.Unlock()
-			return b.Send(ctx, Frame{V: 1, Kind: "response", ID: frame.ID, Error: &Error{Code: "BUSY", Message: "Too many active handlers"}})
+			return b.Send(ctx, Frame{V: 1, Kind: "response", ID: frame.ID, Error: &Error{Code: CodeBusy, Message: "Too many active handlers"}})
 		}
 		go func() {
 			defer func() { <-b.workers }()
@@ -238,6 +247,31 @@ func (b *Bridge) Receive(ctx context.Context, raw []byte) error {
 	return nil
 }
 
+// deliver runs one event listener. A panic is reported and never reaches the caller,
+// so the other listeners and the connection keep working.
+func (b *Bridge) deliver(name string, listener func(json.RawMessage), data json.RawMessage) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			b.report(&Error{Code: CodeListenerError, Message: fmt.Sprintf("Listener for %s panicked: %v", name, recovered)})
+		}
+	}()
+	listener(data)
+}
+
+// report hands an error to OnError, or logs it. A panicking reporter is logged, not propagated.
+func (b *Bridge) report(err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			log.Printf("bridge: error reporter panicked: %v", recovered)
+		}
+	}()
+	if b.onError != nil {
+		b.onError(err)
+		return
+	}
+	log.Printf("bridge: %v", err)
+}
+
 func (b *Bridge) Reject(id string, err error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -254,7 +288,7 @@ func (b *Bridge) Close() {
 	clear(b.handlers)
 	clear(b.events)
 	for id, reply := range b.pending {
-		reply <- Frame{Error: &Error{Code: "DISCONNECTED", Message: "Bridge closed"}}
+		reply <- Frame{Error: &Error{Code: CodeDisconnected, Message: "Bridge closed"}}
 		delete(b.pending, id)
 	}
 }

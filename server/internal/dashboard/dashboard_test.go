@@ -85,3 +85,66 @@ func TestLiveStateTrafficAndBrowserOrigin(t *testing.T) {
 		t.Fatal("accepted cross-origin browser")
 	}
 }
+
+func TestResponsesIncludeDurationAndLiveMessagesIncludeTime(t *testing.T) {
+	app := bridge.New(nil, bridge.Options{})
+	features.Register(app)
+	dash := &Server{Game: &bedrock.Server{}, App: app}
+	mux := http.NewServeMux()
+	dash.Register(mux)
+
+	post := func(body string) map[string]json.RawMessage {
+		r := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:8765/api/request", strings.NewReader(body))
+		r.RemoteAddr = "127.0.0.1:1234"
+		r.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, r)
+		var out map[string]json.RawMessage
+		if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+			t.Fatal(err, w.Body.String())
+		}
+		return out
+	}
+	ok := post(`{"target":"app","name":"app.echo","data":{"text":"hi"}}`)
+	if _, found := ok["durationMs"]; !found || string(ok["data"]) != `{"text":"hi"}` {
+		t.Fatalf("success response missing duration: %v", ok)
+	}
+	failed := post(`{"target":"app","name":"app.echo","data":{}}`)
+	var failure struct {
+		Code string `json:"code"`
+	}
+	if _, found := failed["durationMs"]; !found || json.Unmarshal(failed["error"], &failure) != nil || failure.Code != bridge.CodeInvalidData {
+		t.Fatalf("validation failure not standardized: %v", failed)
+	}
+
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(server.URL, "http")+"/api/live", http.Header{"Origin": []string{server.URL}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	var message struct {
+		Type string `json:"type"`
+		At   int64  `json:"at"`
+	}
+	if err := conn.ReadJSON(&message); err != nil || message.Type != "state" || message.At == 0 {
+		t.Fatal(err, message)
+	}
+	dash.Publish("error", &bridge.Error{Code: bridge.CodeListenerError, Message: "boom"})
+	if err := conn.ReadJSON(&message); err != nil || message.Type != "error" || message.At == 0 {
+		t.Fatal(err, message)
+	}
+}
+
+func TestStatusMappingCoversStandardCodes(t *testing.T) {
+	for code, want := range map[string]int{
+		bridge.CodeInvalidData: 400, bridge.CodePayloadTooLarge: 400, bridge.CodeUnknownRequest: 404,
+		bridge.CodeBusy: 429, bridge.CodeNotReady: 503, bridge.CodeDisconnected: 503,
+		bridge.CodeTimeout: 504, bridge.CodeHandlerError: 502, bridge.CodeCommandRejected: 502,
+	} {
+		if got := statusFor(code); got != want {
+			t.Fatalf("%s -> %d, want %d", code, got, want)
+		}
+	}
+}

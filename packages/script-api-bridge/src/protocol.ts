@@ -1,7 +1,16 @@
 export type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 
+// Standard error codes, shared with the Go package. Applications may add their own codes.
+export const errorCodes = [
+  "INVALID_FRAME", "INVALID_DATA", "PAYLOAD_TOO_LARGE", "UNKNOWN_REQUEST", "HANDLER_ERROR",
+  "LISTENER_ERROR", "TIMEOUT", "BUSY", "DISCONNECTED", "NOT_READY", "COMMAND_REJECTED",
+  "INCOMPATIBLE", "INTERNAL_ERROR",
+] as const;
+
+export type ErrorCode = (typeof errorCodes)[number];
+
 export class BridgeError extends Error {
-  constructor(public readonly code: string, message: string) {
+  constructor(public readonly code: ErrorCode | (string & {}), message: string) {
     super(message);
   }
 }

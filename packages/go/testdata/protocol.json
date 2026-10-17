@@ -20,5 +20,10 @@
     {"v":1,"kind":"event","name":"changed","id":"x","data":null},
     {"v":1,"kind":"event","name":"changed","id":"","data":null},
     {"v":1,"kind":"other","data":null}
+  ],
+  "errorCodes": [
+    "INVALID_FRAME", "INVALID_DATA", "PAYLOAD_TOO_LARGE", "UNKNOWN_REQUEST", "HANDLER_ERROR",
+    "LISTENER_ERROR", "TIMEOUT", "BUSY", "DISCONNECTED", "NOT_READY", "COMMAND_REJECTED",
+    "INCOMPATIBLE", "INTERNAL_ERROR"
   ]
 }

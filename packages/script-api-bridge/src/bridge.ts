@@ -1,27 +1,43 @@
 import { BridgeError, decode, encode, failure } from "./protocol.js";
 import type { Frame, Json } from "./protocol.js";
 
-type Handler = (data: Json) => Json | Promise<Json>;
-type Listener = (data: Json) => void;
+export type Handler = (data: Json) => Json | Promise<Json>;
+export type Listener = (data: Json) => void;
 export type Clock = { set(callback: () => void, milliseconds: number): number; clear(id: number): void };
+export type BridgeOptions = {
+  // Receives listener failures. The default writes a warning to the console.
+  onError?(error: unknown): void;
+};
 
 export class Bridge {
   private readonly handlers = new Map<string, Handler>();
   private readonly events = new Map<string, Set<Listener>>();
   private readonly pending = new Map<string, { resolve(data: Json): void; reject(error: unknown): void }>();
   private readonly prefix = `peer-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  private readonly onError: (error: unknown) => void;
   private sequence = 0;
   private active = 0;
   private closed = false;
 
-  constructor(private readonly send: (raw: string) => void, private readonly clock: Clock) {
+  constructor(
+    private readonly send: (raw: string) => void,
+    private readonly clock: Clock,
+    options: BridgeOptions = {},
+  ) {
+    this.onError = options.onError ?? ((error) => console.warn(`Bridge: ${error}`));
     this.handle("bridge.hello", () => ({ protocol: 1 }));
+    // Heartbeat: any answer, including UNKNOWN_REQUEST from older peers, shows the peer is alive.
+    this.handle("bridge.ping", () => null);
   }
 
-  handle(name: string, handler: Handler): void {
+  // Returns a function that removes this handler.
+  handle(name: string, handler: Handler): () => void {
     this.ensureOpen();
     if (!name || this.handlers.has(name)) throw new Error(`Invalid or duplicate request handler: ${name}`);
     this.handlers.set(name, handler);
+    return () => {
+      if (this.handlers.get(name) === handler) this.handlers.delete(name);
+    };
   }
 
   on(name: string, listener: Listener): () => void {
@@ -72,7 +88,14 @@ export class Bridge {
       return;
     }
     if (frame.kind === "event") {
-      for (const listener of this.events.get(frame.name) ?? []) listener(frame.data);
+      // Each listener runs alone, so one failure cannot stop the others or the connection.
+      for (const listener of [...(this.events.get(frame.name) ?? [])]) {
+        try {
+          listener(frame.data);
+        } catch (error) {
+          this.report(frame.name, error);
+        }
+      }
       return;
     }
     let response: Frame;
@@ -105,6 +128,15 @@ export class Bridge {
     for (const listeners of this.events.values()) listeners.clear();
     this.events.clear();
     this.handlers.clear();
+  }
+
+  private report(name: string, error: unknown): void {
+    const message = error instanceof Error ? error.message : String(error);
+    try {
+      this.onError(new BridgeError("LISTENER_ERROR", `Listener for ${name} failed: ${message}`));
+    } catch {
+      // A failing reporter must not break event delivery.
+    }
   }
 
   private ensureOpen(): void {

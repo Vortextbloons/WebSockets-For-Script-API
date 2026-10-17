@@ -1,18 +1,29 @@
 import { system, world } from "@minecraft/server";
-import type { Bridge } from "script-api-bridge";
+import { withContract } from "script-api-bridge";
+import type { MinecraftConnection } from "script-api-bridge/minecraft";
+import { contract } from "./contract";
 
-export function registerFeatures(bridge: Bridge, namespace: string): void {
-  bridge.handle("game.time", () => ({ ticks: world.getAbsoluteTime() }));
+export function registerFeatures(connection: MinecraftConnection, namespace: string): () => void {
+  const api = withContract(connection.bridge, contract);
+  let closed = false;
 
-  world.afterEvents.playerSpawn.subscribe(({ player, initialSpawn }) => {
-    if (initialSpawn) bridge.emit("game.player_joined", { name: player.name });
+  const stopTime = api.handle("game.time", () => ({ ticks: world.getAbsoluteTime() }));
+
+  const stopSpawn = connection.subscribe(world.afterEvents.playerSpawn, ({ player, initialSpawn }) => {
+    if (initialSpawn) api.emit("game.player_joined", { name: player.name });
   });
 
-  system.afterEvents.scriptEventReceive.subscribe((event) => {
+  const stopDemo = connection.subscribe(system.afterEvents.scriptEventReceive, (event) => {
     if (event.id !== `${namespace}:demo`) return;
-    bridge.request("app.echo", { text: event.message }).then(
-      (result) => world.sendMessage(`Echo: ${JSON.stringify(result)}`),
-      (error) => world.sendMessage(`Echo failed: ${error.message}`),
+    api.request("app.echo", { text: event.message }).then(
+      (result) => { if (!closed) world.sendMessage(`Echo: ${JSON.stringify(result)}`); },
+      (error) => { if (!closed) world.sendMessage(`Echo failed: ${error.message}`); },
     );
   }, { namespaces: [namespace] });
+  return connection.onClose(() => {
+    closed = true;
+    stopDemo();
+    stopSpawn();
+    stopTime();
+  });
 }

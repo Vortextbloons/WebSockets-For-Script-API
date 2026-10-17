@@ -3,3 +3,4 @@ addon/behavior_pack/scripts/
 server/bridge.exe
 packages/script-api-bridge/dist/
 *.tgz
+AGENTS.md

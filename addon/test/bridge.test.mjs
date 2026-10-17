@@ -53,3 +53,53 @@ test("Minecraft adapter uses say, filters script event sources, and handles exam
   spawn({ initialSpawn: true, player: { name: "Steve" } });
   assert.equal(frames()[4].name, "game.player_joined");
 });
+
+test("feature cleanup removes handlers and subscriptions and ignores pending replies", async () => {
+  const output = buildSync({
+    stdin: {
+      contents: 'import { createMinecraftBridge } from "script-api-bridge/minecraft"; import { registerFeatures } from "./src/features"; export const connection = createMinecraftBridge(); export const stop = registerFeatures(connection, "scaffold");',
+      resolveDir: process.cwd(), loader: "ts",
+    },
+    bundle: true, platform: "node", format: "cjs", write: false, external: ["@minecraft/server"],
+  });
+  const signal = () => {
+    const listeners = new Set();
+    return {
+      listeners,
+      subscribe(callback) { listeners.add(callback); return callback; },
+      unsubscribe(callback) { assert.ok(listeners.delete(callback)); },
+    };
+  };
+  const script = signal();
+  const spawn = signal();
+  const messages = [];
+  const commands = [];
+  const context = {
+    console, module: { exports: {} }, exports: {},
+    require: () => ({
+      ScriptEventSource: { Server: "Server" },
+      system: { run: () => 1, runTimeout: () => 2, clearRun() {}, afterEvents: { scriptEventReceive: script } },
+      world: {
+        getAbsoluteTime: () => 1234,
+        getDimension: () => ({ runCommand: (command) => commands.push(command) }),
+        sendMessage: (message) => messages.push(message),
+        afterEvents: { playerSpawn: spawn },
+      },
+    }),
+  };
+  vm.runInNewContext(output.outputFiles[0].text, context);
+  const { connection, stop } = context.module.exports;
+  for (const listener of script.listeners) listener({ id: "scaffold:demo", message: "pending" });
+  const request = JSON.parse(commands[0].slice("say §8[SC] ".length));
+  stop();
+  stop();
+  assert.equal(spawn.listeners.size, 0);
+  assert.equal(script.listeners.size, 1);
+  await connection.bridge.receive(JSON.stringify({ v: 1, kind: "response", id: request.id, data: { text: "pending" } }));
+  await new Promise(setImmediate);
+  assert.equal(messages.length, 0);
+  await connection.bridge.receive(JSON.stringify({ v: 1, kind: "request", id: "time", name: "game.time", data: null }));
+  assert.equal(JSON.parse(commands.at(-1).slice("say §8[SC] ".length)).error.code, "UNKNOWN_REQUEST");
+  connection.close();
+  assert.equal(script.listeners.size, 0);
+});
