@@ -22,6 +22,27 @@ Wait for **Minecraft ready**. Request `game.time` with `null` data in the dashbo
 
 `npm run dev` builds the dashboard and starts the Go app. Copy the rebuilt pack and reload it after changes.
 
+## Optional public website
+
+Public hosting is disabled by default. To serve your own static website, put its built files in a dedicated directory and run from `server/`:
+
+```powershell
+go run ./cmd/bridge -public-dir ../website
+```
+
+This starts a separate HTTP server on `127.0.0.1:8780`. The Minecraft connection and dashboard stay on `127.0.0.1:8765`. Point your tunnel at port **8780** only. Tunnel setup is separate; no hosting provider is required by the app. Stop the tunnel to disable internet access, or restart without `-public-dir` to disable the website server. Serve only files intended to be public; files in this directory are downloadable.
+
+Minecraft access is a separate opt-in. Set a private access token and explicitly allow request names:
+
+```powershell
+$env:BRIDGE_PUBLIC_TOKEN = 'replace-with-a-long-random-secret'
+go run ./cmd/bridge -public-dir ../website -public-actions game.time
+```
+
+Authorized clients can `POST /api/minecraft` with `Authorization: Bearer <token>`, `Content-Type: application/json`, and `{"name":"game.time","data":null}`. Replies contain `{data}` or `{error}`. Enter the token at runtime for trusted visitors; embedding it in public website files gives every visitor access to the allowed actions. The API allows only listed Minecraft requests, limits bodies to 2 KB and authenticated traffic to 20 requests per second across all clients. Application handlers must validate their payloads. Minecraft being offline returns HTTP 503; the static website continues working. There is no offline queue. Dashboard APIs are not mounted on this server.
+
+Multiplayer rooms, game synchronization, and persistent storage are not included. The transport-independent bridge libraries can support those applications without requiring Minecraft.
+
 ## Dashboard
 
 The dashboard at `127.0.0.1:8765` shows connection state and health, and lets you send requests:
