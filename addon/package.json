@@ -9,7 +9,7 @@
     "test": "node --test test/*.test.mjs"
   },
   "dependencies": {
-    "@minecraft/server": "2.9.0",
+    "@minecraft/server": "2.10.0",
     "script-api-bridge": "file:../packages/script-api-bridge"
   },
   "devDependencies": {

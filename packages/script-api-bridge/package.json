@@ -14,7 +14,7 @@
     "test": "npm run build && node --test test/*.test.mjs",
     "prepack": "npm run build"
   },
-  "peerDependencies": { "@minecraft/server": "^2.9.0" },
+  "peerDependencies": { "@minecraft/server": "^2.10.0" },
   "peerDependenciesMeta": { "@minecraft/server": { "optional": true } },
-  "devDependencies": { "@minecraft/server": "2.9.0", "typescript": "7.0.2" }
+  "devDependencies": { "@minecraft/server": "2.10.0", "typescript": "7.0.2" }
 }
